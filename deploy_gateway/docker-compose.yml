@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+
+  service:
+    container_name: gateway
+
+    build:
+      context: ../
+      dockerfile: build/docker/service/Dockerfile
+    restart: unless-stopped
+    ports:
+      - ${SERVICE_PORT}:${SERVICE_PORT}
+    env_file:
+      - .env
