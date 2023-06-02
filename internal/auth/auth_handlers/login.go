@@ -1,14 +1,34 @@
 package auth_handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/educ-educ/gateway/internal/auth"
 	"github.com/gin-gonic/gin"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"io"
+	"net/http"
 	"time"
 )
+
+type loginInDTO struct {
+	ID          int       `json:"id"`
+	UserName    string    `json:"userName"`
+	Email       string    `json:"email"`
+	PhoneNumber string    `json:"phoneNumber"`
+	Roles       *[]string `json:"roles"`
+}
+
+type loginOutDTO struct {
+	ID             int    `json:"id"`
+	UserName       string `json:"username"`
+	FirstName      string `json:"firstName"`
+	LastName       string `json:"lastName"`
+	PatronymicName string `json:"patronymicName"`
+	Role           string `json:"role"`
+}
 
 type LoginHandler struct {
 	ctx              context.Context
@@ -85,12 +105,37 @@ func (handler *LoginHandler) Handle(c *gin.Context) {
 	ctx, cancel = context.WithTimeout(handler.ctx, 3*time.Second)
 	defer cancel()
 
+	var message amqp.Delivery
 	select {
-	case message := <-handler.deliveryChan:
-		_, err = c.Writer.Write(message.Body)
-		auth.FailOnError(err, "Cannot write to response")
+	case message = <-handler.deliveryChan:
+		break
 	case <-ctx.Done():
 		_, err = c.Writer.Write([]byte(ctx.Err().Error()))
 		auth.FailOnError(err, "Cannot write to response")
+		return
 	}
+
+	var buff bytes.Buffer
+	_, err = buff.Write(message.Body)
+	auth.FailOnError(err, "Cannot write message to buffer")
+
+	var inJSON loginInDTO
+	err = json.NewDecoder(&buff).Decode(&inJSON)
+	auth.FailOnError(err, "Cannot write message to buffer")
+
+	var role string
+	if inJSON.Roles != nil && len(*inJSON.Roles) > 0 {
+		role = (*inJSON.Roles)[0]
+	}
+
+	outJSON := loginOutDTO{
+		ID:             inJSON.ID,
+		UserName:       inJSON.UserName,
+		FirstName:      inJSON.UserName,
+		LastName:       "not available yet",
+		PatronymicName: "not available yet",
+		Role:           role,
+	}
+
+	c.JSON(http.StatusOK, outJSON)
 }

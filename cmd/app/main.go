@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/educ-educ/gateway/internal/auth/auth_handlers"
+	"github.com/educ-educ/gateway/internal/courses"
 	"github.com/educ-educ/gateway/internal/pkg/http_tools"
 	"github.com/educ-educ/gateway/internal/pkg/server"
 	"github.com/gin-gonic/gin"
@@ -56,7 +57,7 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(http_tools.ErrorsMiddleware(logger, 5*Mb))
 
-	handlersRouter := router.Group("/auth_handlers")
+	handlersRouter := router.Group("/handlers")
 	handlersRouter.Any("/*proxyPath", func(c *gin.Context) {
 		remote, err := url.Parse("http://handlers_service:8000")
 		if err != nil {
@@ -69,7 +70,7 @@ func main() {
 			req.Host = remote.Host
 			req.URL.Scheme = remote.Scheme
 			req.URL.Host = remote.Host
-			req.URL.Path = "/auth_handlers" + c.Param("proxyPath")
+			req.URL.Path = "/handlers" + c.Param("proxyPath")
 		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
@@ -78,6 +79,38 @@ func main() {
 
 		proxy.ServeHTTP(c.Writer, c.Request)
 	})
+
+	courseRouter := router.Group("/courses")
+	courseRouter.Any("/*proxyPath", func(c *gin.Context) {
+		remote, err := url.Parse("http://course_service:3000")
+		if err != nil {
+			panic(err)
+		}
+
+		proxy := httputil.NewSingleHostReverseProxy(remote)
+		proxy.Director = func(req *http.Request) {
+			req.Header = c.Request.Header
+			req.Host = remote.Host
+			req.URL.Scheme = remote.Scheme
+			req.URL.Host = remote.Host
+			req.URL.Path = "/course" + c.Param("proxyPath")
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+
+		proxy.ServeHTTP(c.Writer, c.Request)
+	})
+
+	internalRouter := router.Group("internal")
+	{
+		coursesRouter := internalRouter.Group("courses")
+		{
+			getAllHandler := courses.NewGetAllHandler(logger, "http://localhost:10110/courses/get-all")
+			coursesRouter.GET("/get-all", getAllHandler.Handle)
+		}
+	}
 
 	rmqContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -117,7 +150,7 @@ func main() {
 		authRouter.POST("/login", login.Handle)
 	}
 
-	addr := ":" + os.Getenv("SERVICE_PORT")
+	addr := "0.0.0.0:" + os.Getenv("SERVICE_PORT")
 	serv := server.NewServer(logger, router, addr)
 	err = serv.Start()
 	if err != nil {
